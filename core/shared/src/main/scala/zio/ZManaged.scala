@@ -711,7 +711,15 @@ final class ZManaged[-R, +E, +A] private (reservation: ZIO[R, E, Reservation[R, 
    * Run an effect while acquiring the resource before and releasing it after
    */
   final def use[R1 <: R, E1 >: E, B](f: A => ZIO[R1, E1, B]): ZIO[R1, E1, B] =
-    reserve.bracketExit((r, e: Exit[Any, Any]) => r.release(e), _.acquire.flatMap(f))
+    reserve.bracketExit((r, e: Exit[Any, Any]) => {
+      println("RELEASING!")
+      r.release(e)}, { x=>
+      println("Acquiring")
+      x.acquire.flatMap { v =>
+        println("Applying acquired resource")
+        ZIO.effectTotal(println("ZIO before applygin the function to the resource")) *> f(v).map { x => println("Mapping the ZIO we got from applying the function to the resource"); x }
+      }
+    })
 
   /**
    *  Run an effect while acquiring the resource before and releasing it after.

@@ -44,6 +44,7 @@ class Promise[E, A] private (private val state: AtomicReference[State[E, A]]) ex
    */
   final def await: IO[E, A] =
     IO.effectAsyncInterrupt[E, A](k => {
+      println("Duimendraaien voor een promise")
       var result = null.asInstanceOf[Either[Canceler[Any], IO[E, A]]]
       var retry  = true
 

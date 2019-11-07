@@ -203,7 +203,10 @@ object Queue {
   ): Queue[A] = new ZQueue[Any, Nothing, Any, Nothing, A, A] {
 
     private final val checkShutdownState: UIO[Unit] =
-      shutdownHook.poll.flatMap(_.fold[UIO[Unit]](IO.unit)(_ => IO.interrupt))
+      shutdownHook.poll.flatMap(_.fold[UIO[Unit]](IO.unit){_ =>
+        println("Interrupting because of 'checkShutdownState")
+        IO.interrupt
+      })
 
     @tailrec
     private final def pollTakersThenQueue(): Option[(Promise[Nothing, A], A)] =
@@ -228,12 +231,16 @@ object Queue {
       pollTakersThenQueue() match {
         case None =>
         case Some((p, a)) =>
+          println("Completing some takers")
           unsafeCompletePromise(p, a)
           strategy.unsafeOnQueueEmptySpace(queue)
           unsafeCompleteTakers()
       }
 
-    private final def removeTaker(taker: Promise[Nothing, A]): UIO[Unit] = IO.effectTotal(unsafeRemove(takers, taker))
+    private final def removeTaker(taker: Promise[Nothing, A]): UIO[Unit] = IO.effectTotal {
+      println("Removing a taker!")
+      unsafeRemove(takers, taker)
+    }
 
     final val capacity: Int = queue.capacity
 

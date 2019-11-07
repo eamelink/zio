@@ -16,7 +16,7 @@
 
 package zio.stream
 
-import java.io.{ IOException, InputStream }
+import java.io.{IOException, InputStream}
 
 import com.github.ghik.silencer.silent
 import zio._
@@ -39,6 +39,43 @@ import zio.stream.ZStream.Pull
  * specialized effect type (ZIO), streams feature extremely good type inference
  * and should almost never require specification of any type parameters.
  */
+
+object Repro extends zio.App {
+
+  def stream = {
+    val x =
+      ZStream.fromIterable[Int](Seq.empty)
+
+    val y =
+      x.partitionEither(i => ZIO.succeed(if (i % 2 == 0) Left(i) else Right(i)))
+
+    val z =
+      y.map { case (evens, odds) =>
+        println(Thread.currentThread().getName)
+        val out = evens.merge(odds)
+        println("Out created!")
+        out
+      }
+    z.use { s =>
+      println("Using the stream!" )
+      val out = s.runCollect
+      println("Done collecting")
+      out
+    }
+
+
+  }
+
+  override def run(args: List[String]) = {
+    ZIO.sequence(Range(0, 100).toList.map(i => for {
+      _ <- console.putStrLn("Starting an interation!\n")
+      res <- stream
+      _ <- ZIO.effectTotal(println(s"$i, $res"))
+    } yield ())).map(_ => 0)
+  }
+}
+
+
 class ZStream[-R, +E, +A] private[stream] (private[stream] val structure: ZStream.Structure[R, E, A])
     extends Serializable { self =>
   import ZStream.GroupBy
@@ -1804,12 +1841,16 @@ class ZStream[-R, +E, +A] private[stream] (private[stream] val structure: ZStrea
   ): ZManaged[R1, E1, (ZStream[Any, E1, B], ZStream[Any, E1, C])] =
     self
       .mapM(p)
+    .map { x =>
+      println("Going into 'distributedWith"); x
+      }
       .distributedWith(2, buffer, {
         case Left(_)  => ZIO.succeed(_ == 0)
         case Right(_) => ZIO.succeed(_ == 1)
       })
       .flatMap {
         case q1 :: q2 :: Nil =>
+          println("Flatmapping after distributedWith")
           ZManaged.succeed {
             (
               ZStream.fromQueueWithShutdown(q1).unTake.collect { case Left(x)  => x },
@@ -1975,21 +2016,39 @@ class ZStream[-R, +E, +A] private[stream] (private[stream] val structure: ZStrea
    */
   def run[R1 <: R, E1 >: E, A0, A1 >: A, B](sink: ZSink[R1, E1, A0, A1, B]): ZIO[R1, E1, B] =
     sink.initial.flatMap { initial =>
+      println("Flatmapping the initial sink")
       self.process.use { as =>
-        def pull(state: sink.State): ZIO[R1, E1, B] =
-          as.foldM(
+        println("Using self.process")
+        def pull(state: sink.State): ZIO[R1, E1, B] = {
+          ZIO.effectTotal(println("In the pull method, mapping on our 'as' of type: " + as.getClass)) *>
+          as.map { e => println("Successsss"); e}.mapError{ e => println("Errrrorrrr"); e }.foldM(
             {
-              case Some(e) => ZIO.fail(e)
-              case None    => sink.extract(state).map(_._1)
+              case Some(e) =>
+                println("foldM fail, Some(e)")
+                ZIO.fail(e)
+              case None    =>
+                println("foldM fail, None")
+                sink.extract(state).map(_._1)
             },
-            sink.step(state, _).flatMap { step =>
-              if (sink.cont(step)) pull(step)
-              else sink.extract(step).map(_._1)
-            }
-          )
+            { x =>
+              println(s"foldM success, $x")
+              sink.step(state, x).flatMap { step =>
 
-        pull(initial)
-      }
+                println(s"Flatmapping the step, $step")
+                if (sink.cont(step)) pull(step)
+                else sink.extract(step).map(_._1)
+            }}
+          )
+        }
+
+        println("Pulling, " + Thread.currentThread().getName)
+        val x = ZIO.effectTotal(println("Starting to pull")) *> pull(initial).map { r => println("Done with a pull"); r }
+        println(">>> Returning from process.use")
+        x
+      }.map{ x => println("Mapping after self.process.use"); x }
+    }.map { x =>
+      println("Mapping after sink.initial.flatMap")
+      x
     }
 
   /**

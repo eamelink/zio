@@ -308,6 +308,9 @@ private[zio] final class FiberContext[E, A](
             } else {
               // Fiber is neither being interrupted nor needs to yield. Execute
               // the next instruction in the program:
+              //println("Executing a " + curZio.getClass)
+
+
               (tag: @switch) match {
                 case ZIO.Tags.FlatMap =>
                   val zio = curZio.asInstanceOf[ZIO.FlatMap[Any, E, Any, Any]]
@@ -476,11 +479,21 @@ private[zio] final class FiberContext[E, A](
 
                     if (traceEffects && inTracingRegion) addTrace(k)
 
+                    println("Registering handler.")
                     k(resumeAsync(epoch)) match {
-                      case Some(zio) => if (exitAsync(epoch)) zio else null
-                      case None      => null
+                      case Some(zio) =>
+                        println("Called back with some zio")
+                        if (exitAsync(epoch)) zio else {
+                          null
+                        }
+                      case None      =>
+                        println("Called back with None")
+                        println(execTrace.toReversedList.mkString("\t", "\n\t", ""))
+
+                        null
                     }
                   } else ZIO.interrupt
+
 
                 case ZIO.Tags.Fork =>
                   val zio = curZio.asInstanceOf[ZIO.Fork[Any, Any, Any]]
@@ -585,9 +598,11 @@ private[zio] final class FiberContext[E, A](
           }
 
           opcount = opcount + 1
+
         }
       } catch {
         case _: InterruptedException =>
+          println("Girl, interrupted")
           Thread.interrupted()
           curZio = ZIO.interrupt
 
@@ -595,6 +610,7 @@ private[zio] final class FiberContext[E, A](
         // either a bug in the interpreter or a bug in the user's code. Let the
         // fiber die but attempt finalization & report errors.
         case t: Throwable =>
+          println("Catastrophy!")
           curZio = if (platform.fatal(t)) platform.reportFatal(t) else ZIO.die(t)
       }
     }
@@ -736,6 +752,7 @@ private[zio] final class FiberContext[E, A](
   private[this] final def exitAsync(epoch: Long): Boolean = {
     val oldState = state.get
 
+    println("Old State: " + oldState)
     oldState match {
       case Executing(FiberStatus.Suspended(_, oldEpoch), observers, interrupt) if epoch == oldEpoch =>
         if (!state.compareAndSet(oldState, Executing(FiberStatus.Running, observers, interrupt))) exitAsync(epoch)
